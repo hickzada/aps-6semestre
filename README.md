@@ -135,7 +135,7 @@ Caso o professor pergunte no seminário como o código funciona, a resposta est�
 
 Conforme o Manual da APS (páginas 3 a 5), o trabalho tem duas fases e avaliação dividida em:
 - **Trabalho Escrito (35%)**
-- **Programa Desenvolvido (35%)** *(Protótipo pronto aqui!)*
+- **Programa Desenvolvido (35%)** *(Protótipo pronto aqui!)* Precisamos terminar
 - **Apresentação em Sala (30%)**
 
 ### O que ainda precisamos fazer juntos:
@@ -148,7 +148,7 @@ Conforme o Manual da APS (páginas 3 a 5), o trabalho tem duas fases e avaliaç�
   - Preencher Capítulo 3 (Proposta dos Filtros e justificativa).
   - Preencher Capítulo 4 (Resultados obtidos com as fotos da pasta `etapas_processamento/`).
   - Preencher Apêndice com o código-fonte (`prototipo_vigia.py`).
-- [ ] **Apresentação Oral (10 a 15 minutos):**
+- [X] **Apresentação Oral (10 a 15 minutos):**
   - Adaptar o pitch do arquivo `documentos/VigIA_Pitch.pptx`.
   - Distribuir a fala igualmente entre todos os membros (a participação individual vale 20% da nota da apresentação).
 - [ ] **Ficha de APS:**
