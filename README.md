@@ -43,6 +43,7 @@ aps-6semestre/
 ├── README.md                   # Documento de apresentação e guia de execução
 ├── DOCUMENTACAO_APS_VIGIA.md   # Documentação técnica e fundamentação teórica
 ├── prototipo_vigia.py          # Núcleo do sistema: PDI manual + inferência + sustentabilidade
+├── interface_webcam.py         # Interface visual interativa: vídeo ao vivo + máscara PDI + métricas
 ├── treinar_modelo.py           # Treinamento da mini-CNN Keras (~15 linhas essenciais)
 ├── test_vigia.py               # Suíte formal de testes automatizados (23 testes, 100% pass)
 ├── modelo_vigia.keras          # Modelo convolucional serializado
@@ -87,14 +88,20 @@ python3 prototipo_vigia.py
 ```
 O console exibirá o log detalhado do pipeline de PDI, a decisão probabilística da rede neural convolucional e o relatório consolidado de sustentabilidade energética.
 
-### 3. Executar o Protótipo com Webcam em Tempo Real (Ao Vivo na Apresentação)
-Para demonstrar o sistema operando ao vivo com a câmera do seu computador (sem qualquer dependência de OpenCV, utilizando a biblioteca nativa `pygame.camera`):
+### 3. Executar a Interface Visual Interativa com Câmera ao Vivo (Zero OpenCV)
+Para abrir o painel gráfico completo com a câmera ao vivo, a máscara de PDI em tempo real e os indicadores de iluminação e sustentabilidade:
 ```bash
+python3 interface_webcam.py
+# ou
 python3 prototipo_vigia.py --webcam
 ```
-- O sistema solicitará que a sala esteja vazia para capturar o fundo de referência ao pressionar `[ENTER]`.
-- Em seguida, iniciará o monitoramento contínuo: quando você sentar na frente do computador ou sair, o sistema identificará a mudança de estado e acionará a lâmpada em tempo real.
-- Pressione `Ctrl+C` para encerrar e gerar o Relatório de Sustentabilidade da sessão.
+**Recursos da Interface Visual:**
+- **Vídeo ao Vivo (Esquerda):** Exibe a transmissão em tempo real da sua câmera com borda dinâmica (Verde = Sala Ocupada / Vermelho = Sala Vazia).
+- **Máscara de PDI Artesanal (Direita):** Mostra a segmentação morfológica gerada pixel a pixel pelo seu algoritmo manual (silhueta branca sobre fundo preto).
+- **Painel de Decisão e Sustentabilidade:** Exibe a probabilidade da mini-CNN, o percentual de área ocupada, a economia de energia ($kWh$), os reais poupados ($R\$$) e o $CO_2$ evitado em tempo real.
+- **Controles pelo Teclado:**
+  - `[ESPAÇO]`: Recalibra o plano de fundo instantaneamente (afaste-se da câmera e aperte a barra de espaço para definir o ambiente vazio).
+  - `[ESC]` ou `[Q]`: Encerra a sessão e imprime o relatório consolidado de sustentabilidade.
 
 ### 4. Re-treinar a Mini-CNN do Zero (Opcional)
 Caso queira demonstrar o processo de treinamento supervisionado para a banca:

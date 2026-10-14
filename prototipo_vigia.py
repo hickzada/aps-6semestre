@@ -565,12 +565,23 @@ class DetectorPresencaVigIA:
             prob_neural = self.classificar_neural(imagem_original)
 
         if prob_neural is not None:
-            presenca_neural = prob_neural >= 0.5
-            presenca_confirmada = presenca_neural
-            if presenca_confirmada:
-                confianca = max(70.0, prob_neural * 100.0)
+            # Fusão ponderada de decisão PDI e Rede Convolucional Keras:
+            # 1. Área segmentada nítida pelo PDI (>= 2.5%): confirma ocupação humana imediata
+            # 2. Área no limiar (0.8% a 2.5%): validação cruzada exigindo predição da CNN (>= 0.40)
+            # 3. Área insignificante (< 0.8%): sala desocupada (ruídos ópticos/eletrônicos eliminados)
+            if percentual_ocupado >= 2.5:
+                presenca_confirmada = True
+                confianca = max(80.0, min(99.9, 70.0 + percentual_ocupado * 2.0))
+            elif percentual_ocupado >= self.percentual_minimo_ocupacao:
+                if prob_neural >= 0.40:
+                    presenca_confirmada = True
+                    confianca = max(70.0, prob_neural * 100.0)
+                else:
+                    presenca_confirmada = False
+                    confianca = max(70.0, (1.0 - prob_neural) * 100.0)
             else:
-                confianca = max(70.0, (1.0 - prob_neural) * 100.0)
+                presenca_confirmada = False
+                confianca = max(75.0, (1.0 - prob_neural) * 100.0)
         else:
             presenca_confirmada = presenca_pdi
             if presenca_confirmada:
@@ -884,92 +895,16 @@ def executar_demonstracao_vigia():
 
 def executar_modo_webcam():
     """
-    Executa a aquisição e monitoramento de presença em tempo real a partir da webcam do computador.
-    Utiliza exclusivamente a biblioteca nativa pygame.camera para captura de dispositivos de vídeo (/dev/video*),
-    sem nenhuma dependência de OpenCV, mantendo conformidade estrita com o manual da UNIP.
+    Inicia a interface gráfica com câmera ao vivo e máscara de PDI em tempo real.
+    Utiliza Pygame nativo (zero OpenCV) para exibição fluida da câmera e indicadores.
     """
-    import time
     try:
-        import pygame
-        import pygame.camera
-    except ImportError:
-        print("\n[ERRO DE DEPENDÊNCIA] O módulo pygame não está disponível no ambiente.")
-        print("Para utilizar a captura por webcam sem OpenCV, certifique-se de que o pygame está instalado:")
-        print("  pip install pygame")
-        return
-
-    pygame.init()
-    pygame.camera.init()
-    cameras = pygame.camera.list_cameras()
-    if not cameras:
-        print("\n[ERRO DE HARDWARE] Nenhuma webcam ou dispositivo de vídeo foi detectado no sistema.")
-        return
-
-    print("\n" + "#"*70)
-    print("   SISTEMA VIGIA - MONITORAMENTO EM TEMPO REAL (WEBCAM)")
-    print("#"*70)
-    print(f"[HARDWARE] Câmeras disponíveis no sistema: {cameras}")
-    dispositivo = cameras[0]
-    print(f"[CONEXÃO] Inicializando captura no dispositivo: {dispositivo}")
-
-    cam = pygame.camera.Camera(dispositivo, (640, 480))
-    cam.start()
-
-    sistema = SistemaVigIA(potencia_iluminacao_watts=400, tarifa_kwh=0.85)
-    pasta_etapas = os.path.join(os.path.dirname(os.path.abspath(__file__)), "etapas_processamento")
-
-    print("\n" + "="*70)
-    print("ETAPA 1: CALIBRAÇÃO DO PLANO DE FUNDO ESTÁTICO (SALA VAZIA)")
-    print("Por favor, garanta que a sala/ambiente em frente à câmera esteja VAZIO.")
-    print("Pressione [ENTER] no terminal para capturar e calibrar o fundo...")
-    print("="*70)
-    try:
-        input()
-    except (EOFError, KeyboardInterrupt):
-        pass
-
-    # Descarta primeiros quadros para ajuste fotométrico e balanço de branco da câmera
-    for _ in range(5):
-        cam.get_image()
-        time.sleep(0.05)
-
-    surf_fundo = cam.get_image()
-    raw_fundo = pygame.image.tostring(surf_fundo, "RGB")
-    img_fundo = Image.frombytes("RGB", surf_fundo.get_size(), raw_fundo)
-    sistema.calibrar_fundo(img_fundo)
-
-    print("\n" + "="*70)
-    print("ETAPA 2: MONITORAMENTO CONTÍNUO AO VIVO")
-    print("Pipeline ativo: Aquisição -> Tons de Cinza -> Gaussiano -> Sobel -> Subtração -> Morfologia -> CNN")
-    print("Pressione Ctrl+C a qualquer momento para encerrar e gerar o Relatório de Sustentabilidade.")
-    print("="*70 + "\n")
-
-    contador = 0
-    try:
-        while True:
-            surf_atual = cam.get_image()
-            raw_atual = pygame.image.tostring(surf_atual, "RGB")
-            img_atual = Image.frombytes("RGB", surf_atual.get_size(), raw_atual)
-
-            contador += 1
-            # Salva evidências visuais e painel comparativo periodicamente a cada 5 leituras
-            salvar_debug = pasta_etapas if (contador % 5 == 1) else None
-
-            # Simula intervalo de amostragem de 1 minuto para o balanço energético
-            sistema.processar_ciclo(
-                caminho_imagem_atual=img_atual,
-                sinal_sensor_pir=True,
-                duracao_minutos=1.0,
-                pasta_saida_debug=salvar_debug
-            )
-            time.sleep(1.0)
-    except KeyboardInterrupt:
-        print("\n\n[ENCERRAMENTO] Interrupção solicitada pelo usuário. Desativando monitoramento...")
-    finally:
-        cam.stop()
-        pygame.quit()
-
-    print(sistema.gerar_relatorio_sustentabilidade())
+        from interface_webcam import executar_interface_webcam
+        executar_interface_webcam()
+    except Exception as e:
+        print(f"\n[ERRO AO INICIALIZAR INTERFACE] {e}")
+        print("Certifique-se de que o ambiente gráfico e as dependências estão ativos:")
+        print("  pip install pygame pillow numpy tensorflow")
 
 
 if __name__ == "__main__":
