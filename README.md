@@ -61,7 +61,8 @@ aps-6semestre/
 │   ├── 3_realce_sobel.png      # Gradiente e realce de arestas/silhuetas
 │   ├── 4_subtracao_fundo.png   # Diferença absoluta em relação ao fundo
 │   ├── 5_binarizacao_limiar.png# Binarização estática por corte de limiar
-│   └── 6_morfologia_final.png  # Abertura morfológica (erosão + dilatação)
+│   ├── 6_morfologia_final.png  # Abertura morfológica (erosão + dilatação)
+│   └── painel_comparativo_pdi.png # Mosaico sintético reunindo todas as etapas com legendas
 │
 └── documentos/                 # Diretório de apoio acadêmico
     ├── ManualAPS.pdf           # Manual oficial de orientações da UNIP
@@ -74,26 +75,35 @@ aps-6semestre/
 ## 🚀 Como Executar o Projeto
 
 ### 1. Pré-requisitos
-Recomenda-se ambiente Python 3.9 ou superior com as seguintes dependências:
+Recomenda-se ambiente Python 3.9 ou superior com as seguintes dependências (sem OpenCV):
 ```bash
-pip install pillow numpy tensorflow
+pip install pillow numpy tensorflow pygame
 ```
 
-### 2. Executar o Protótipo VigIA (Demonstração Completa)
+### 2. Executar o Protótipo VigIA (Demonstração Completa com Imagens Reais)
 Para simular os 4 ciclos operacionais (entrada de ocupantes, desocupação da sala, modo sentinela e religamento imediato):
 ```bash
 python3 prototipo_vigia.py
 ```
 O console exibirá o log detalhado do pipeline de PDI, a decisão probabilística da rede neural convolucional e o relatório consolidado de sustentabilidade energética.
 
-### 3. Re-treinar a Mini-CNN do Zero (Opcional)
+### 3. Executar o Protótipo com Webcam em Tempo Real (Ao Vivo na Apresentação)
+Para demonstrar o sistema operando ao vivo com a câmera do seu computador (sem qualquer dependência de OpenCV, utilizando a biblioteca nativa `pygame.camera`):
+```bash
+python3 prototipo_vigia.py --webcam
+```
+- O sistema solicitará que a sala esteja vazia para capturar o fundo de referência ao pressionar `[ENTER]`.
+- Em seguida, iniciará o monitoramento contínuo: quando você sentar na frente do computador ou sair, o sistema identificará a mudança de estado e acionará a lâmpada em tempo real.
+- Pressione `Ctrl+C` para encerrar e gerar o Relatório de Sustentabilidade da sessão.
+
+### 4. Re-treinar a Mini-CNN do Zero (Opcional)
 Caso queira demonstrar o processo de treinamento supervisionado para a banca:
 ```bash
 python3 treinar_modelo.py
 ```
 O script carregará as amostras de `dataset/`, treinará o modelo convolucional por 10 épocas e atualizará o arquivo `modelo_vigia.keras`.
 
-### 4. Executar os Testes Automatizados de Qualidade
+### 5. Executar os Testes Automatizados de Qualidade
 Para certificar a integridade matemática dos filtros e a correta tomada de decisão:
 ```bash
 python3 test_vigia.py

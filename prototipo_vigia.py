@@ -42,14 +42,16 @@ class ProcessadorImagem:
     @staticmethod
     def carregar_imagem(caminho_arquivo, redimensionar=(320, 240)):
         """
-        Carrega uma imagem real do disco e converte para RGB.
+        Carrega uma imagem real do disco ou recebe instancia PIL.Image e converte para RGB.
         Aplica redimensionamento proporcional para resolução padrão de processamento
         (padrão da indústria de CFTV para garantir velocidade em tempo real).
         """
-        if not os.path.exists(caminho_arquivo):
-            raise FileNotFoundError(f"Arquivo de imagem não encontrado: {caminho_arquivo}")
-
-        imagem = Image.open(caminho_arquivo).convert("RGB")
+        if isinstance(caminho_arquivo, Image.Image):
+            imagem = caminho_arquivo.convert("RGB")
+        else:
+            if not os.path.exists(caminho_arquivo):
+                raise FileNotFoundError(f"Arquivo de imagem não encontrado: {caminho_arquivo}")
+            imagem = Image.open(caminho_arquivo).convert("RGB")
 
         if redimensionar is not None:
             # Redimensionamento suave para processamento eficiente
@@ -355,6 +357,15 @@ class ProcessadorImagem:
             cls.salvar_imagem(matriz_subtracao, os.path.join(diretorio_saida, "4_subtracao_fundo.png"))
             cls.salvar_imagem(matriz_binarizada, os.path.join(diretorio_saida, "5_binarizacao_limiar.png"))
             cls.salvar_imagem(matriz_morfologia, os.path.join(diretorio_saida, "6_morfologia_final.png"))
+            cls.gerar_painel_comparativo(
+                imagem_atual,
+                matriz_cinza,
+                matriz_gaussiano,
+                matriz_sobel,
+                matriz_subtracao,
+                matriz_morfologia,
+                caminho_saida=os.path.join(diretorio_saida, "painel_comparativo_pdi.png")
+            )
 
         altura = len(matriz_cinza)
         largura = len(matriz_cinza[0])
@@ -367,6 +378,71 @@ class ProcessadorImagem:
             imagens[nome] = img
 
         return imagens
+
+    @classmethod
+    def gerar_painel_comparativo(cls, imagem_original, matriz_cinza, matriz_suave, matriz_sobel,
+                                 matriz_subtracao, matriz_morfologia, caminho_saida):
+        """
+        Gera um mosaico analítico 2x3 reunindo a cena original e as 5 etapas de PDI com legendas formais.
+        Utilizado como elemento visual sintético para a monografia acadêmica e apresentação de slides.
+        """
+        from PIL import ImageDraw, ImageFont
+
+        altura = len(matriz_cinza)
+        largura = len(matriz_cinza[0])
+
+        def matriz_para_pil(m, modo="L"):
+            img = Image.new(modo, (largura, altura))
+            pix = [int(max(0, min(255, round(m[y][x])))) for y in range(altura) for x in range(largura)]
+            img.putdata(pix)
+            return img
+
+        if isinstance(imagem_original, Image.Image):
+            img_orig = imagem_original.convert("RGB").resize((largura, altura), Image.Resampling.BILINEAR)
+        else:
+            img_orig = cls.carregar_imagem(imagem_original, redimensionar=(largura, altura))
+
+        img_cinza = matriz_para_pil(matriz_cinza).convert("RGB")
+        img_suave = matriz_para_pil(matriz_suave).convert("RGB")
+        img_sobel = matriz_para_pil(matriz_sobel).convert("RGB")
+        img_sub = matriz_para_pil(matriz_subtracao).convert("RGB")
+        img_morf = matriz_para_pil(matriz_morfologia).convert("RGB")
+
+        paineis = [
+            ("1. Cena Original (RGB)", img_orig),
+            ("2. Tons de Cinza (BT.601)", img_cinza),
+            ("3. Suavizacao Gaussiana 3x3", img_suave),
+            ("4. Realce de Bordas Sobel 3x3", img_sobel),
+            ("5. Subtracao de Fundo (|I - B|)", img_sub),
+            ("6. Morfologia Final (Abertura)", img_morf),
+        ]
+
+        margem_x, margem_y = 15, 15
+        cabecalho_alt = 40
+        rotulo_alt = 24
+        largura_total = 3 * largura + 4 * margem_x
+        altura_total = cabecalho_alt + 2 * (altura + rotulo_alt) + 3 * margem_y
+
+        mosaico = Image.new("RGB", (largura_total, altura_total), (245, 247, 250))
+        draw = ImageDraw.Draw(mosaico)
+        font = ImageFont.load_default()
+
+        draw.rectangle([(0, 0), (largura_total, cabecalho_alt)], fill=(30, 41, 59))
+        draw.text((margem_x, 14), "SISTEMA VIGIA - ETAPAS DO PROCESSAMENTO DIGITAL DE IMAGENS (APS UNIP CC)", fill=(255, 255, 255), font=font)
+
+        for idx, (titulo, sub_img) in enumerate(paineis):
+            linha = idx // 3
+            coluna = idx % 3
+            pos_x = margem_x + coluna * (largura + margem_x)
+            pos_y = cabecalho_alt + margem_y + linha * (altura + rotulo_alt + margem_y)
+
+            draw.rectangle([(pos_x, pos_y), (pos_x + largura, pos_y + rotulo_alt)], fill=(51, 65, 85))
+            draw.text((pos_x + 8, pos_y + 6), titulo, fill=(255, 255, 255), font=font)
+            mosaico.paste(sub_img, (pos_x, pos_y + rotulo_alt))
+
+        os.makedirs(os.path.dirname(os.path.abspath(caminho_saida)), exist_ok=True)
+        mosaico.save(caminho_saida)
+        return caminho_saida
 
 
 # ===================================================================================
@@ -580,9 +656,13 @@ class SistemaVigIA:
 
     def calibrar_fundo(self, caminho_imagem_sala_vazia):
         """
-        Calibração com a foto real do ambiente vazio.
+        Calibração com a foto real ou quadro de vídeo do ambiente vazio.
         """
-        print(f"\n[CALIBRAÇÃO VIGIA] Carregando imagem real de fundo: {os.path.basename(caminho_imagem_sala_vazia)}")
+        if isinstance(caminho_imagem_sala_vazia, str):
+            nome = os.path.basename(caminho_imagem_sala_vazia)
+        else:
+            nome = "Quadro_Calibracao_Webcam"
+        print(f"\n[CALIBRAÇÃO VIGIA] Carregando imagem real de fundo: {nome}")
         imagem = self.processador.carregar_imagem(caminho_imagem_sala_vazia)
         matriz_cinza = self.processador.converter_para_tons_de_cinza(imagem)
         self.matriz_fundo_referencia = self.processador.filtro_suavizacao_gaussiana_3x3(matriz_cinza)
@@ -597,7 +677,10 @@ class SistemaVigIA:
         self.horas_totais_monitoradas += (duracao_minutos / 60.0)
 
         print("\n" + "="*70)
-        nome_arquivo = os.path.basename(caminho_imagem_atual)
+        if isinstance(caminho_imagem_atual, str):
+            nome_arquivo = os.path.basename(caminho_imagem_atual)
+        else:
+            nome_arquivo = "Quadro_Webcam_AoVivo"
         print(f"CICLO DE MONITORAMENTO VIGIA | Imagem: {nome_arquivo} | Intervalo: {duracao_minutos} min")
         print(f"Estado Inicial: LUZ={'LIGADA' if self.luz_acesa else 'DESLIGADA'} | Sensor PIR={'ATIVO' if sinal_sensor_pir else 'INATIVO'}")
         print("="*70)
@@ -665,7 +748,16 @@ class SistemaVigIA:
             self.processador.salvar_imagem(resultado["matrizes_intermediarias"]["diferenca"], os.path.join(pasta_saida_debug, "4_subtracao_fundo.png"))
             self.processador.salvar_imagem(resultado["matrizes_intermediarias"]["binaria"], os.path.join(pasta_saida_debug, "5_binarizacao_limiar.png"))
             self.processador.salvar_imagem(resultado["matrizes_intermediarias"]["morfologia"], os.path.join(pasta_saida_debug, "6_morfologia_final.png"))
-            print(f"[EVIDÊNCIAS APS] 6 etapas de PDI salvas em: '{pasta_saida_debug}'")
+            self.processador.gerar_painel_comparativo(
+                imagem_atual,
+                matriz_cinza,
+                matriz_suave,
+                matriz_bordas_sobel,
+                resultado["matrizes_intermediarias"]["diferenca"],
+                resultado["matrizes_intermediarias"]["morfologia"],
+                caminho_saida=os.path.join(pasta_saida_debug, "painel_comparativo_pdi.png")
+            )
+            print(f"[EVIDÊNCIAS APS] 6 etapas e painel comparativo salvos em: '{pasta_saida_debug}'")
 
         return {
             "luz_ligada": self.luz_acesa,
@@ -790,5 +882,98 @@ def executar_demonstracao_vigia():
     print(sistema.gerar_relatorio_sustentabilidade())
 
 
+def executar_modo_webcam():
+    """
+    Executa a aquisição e monitoramento de presença em tempo real a partir da webcam do computador.
+    Utiliza exclusivamente a biblioteca nativa pygame.camera para captura de dispositivos de vídeo (/dev/video*),
+    sem nenhuma dependência de OpenCV, mantendo conformidade estrita com o manual da UNIP.
+    """
+    import time
+    try:
+        import pygame
+        import pygame.camera
+    except ImportError:
+        print("\n[ERRO DE DEPENDÊNCIA] O módulo pygame não está disponível no ambiente.")
+        print("Para utilizar a captura por webcam sem OpenCV, certifique-se de que o pygame está instalado:")
+        print("  pip install pygame")
+        return
+
+    pygame.init()
+    pygame.camera.init()
+    cameras = pygame.camera.list_cameras()
+    if not cameras:
+        print("\n[ERRO DE HARDWARE] Nenhuma webcam ou dispositivo de vídeo foi detectado no sistema.")
+        return
+
+    print("\n" + "#"*70)
+    print("   SISTEMA VIGIA - MONITORAMENTO EM TEMPO REAL (WEBCAM)")
+    print("#"*70)
+    print(f"[HARDWARE] Câmeras disponíveis no sistema: {cameras}")
+    dispositivo = cameras[0]
+    print(f"[CONEXÃO] Inicializando captura no dispositivo: {dispositivo}")
+
+    cam = pygame.camera.Camera(dispositivo, (640, 480))
+    cam.start()
+
+    sistema = SistemaVigIA(potencia_iluminacao_watts=400, tarifa_kwh=0.85)
+    pasta_etapas = os.path.join(os.path.dirname(os.path.abspath(__file__)), "etapas_processamento")
+
+    print("\n" + "="*70)
+    print("ETAPA 1: CALIBRAÇÃO DO PLANO DE FUNDO ESTÁTICO (SALA VAZIA)")
+    print("Por favor, garanta que a sala/ambiente em frente à câmera esteja VAZIO.")
+    print("Pressione [ENTER] no terminal para capturar e calibrar o fundo...")
+    print("="*70)
+    try:
+        input()
+    except (EOFError, KeyboardInterrupt):
+        pass
+
+    # Descarta primeiros quadros para ajuste fotométrico e balanço de branco da câmera
+    for _ in range(5):
+        cam.get_image()
+        time.sleep(0.05)
+
+    surf_fundo = cam.get_image()
+    raw_fundo = pygame.image.tostring(surf_fundo, "RGB")
+    img_fundo = Image.frombytes("RGB", surf_fundo.get_size(), raw_fundo)
+    sistema.calibrar_fundo(img_fundo)
+
+    print("\n" + "="*70)
+    print("ETAPA 2: MONITORAMENTO CONTÍNUO AO VIVO")
+    print("Pipeline ativo: Aquisição -> Tons de Cinza -> Gaussiano -> Sobel -> Subtração -> Morfologia -> CNN")
+    print("Pressione Ctrl+C a qualquer momento para encerrar e gerar o Relatório de Sustentabilidade.")
+    print("="*70 + "\n")
+
+    contador = 0
+    try:
+        while True:
+            surf_atual = cam.get_image()
+            raw_atual = pygame.image.tostring(surf_atual, "RGB")
+            img_atual = Image.frombytes("RGB", surf_atual.get_size(), raw_atual)
+
+            contador += 1
+            # Salva evidências visuais e painel comparativo periodicamente a cada 5 leituras
+            salvar_debug = pasta_etapas if (contador % 5 == 1) else None
+
+            # Simula intervalo de amostragem de 1 minuto para o balanço energético
+            sistema.processar_ciclo(
+                caminho_imagem_atual=img_atual,
+                sinal_sensor_pir=True,
+                duracao_minutos=1.0,
+                pasta_saida_debug=salvar_debug
+            )
+            time.sleep(1.0)
+    except KeyboardInterrupt:
+        print("\n\n[ENCERRAMENTO] Interrupção solicitada pelo usuário. Desativando monitoramento...")
+    finally:
+        cam.stop()
+        pygame.quit()
+
+    print(sistema.gerar_relatorio_sustentabilidade())
+
+
 if __name__ == "__main__":
-    executar_demonstracao_vigia()
+    if "--webcam" in sys.argv:
+        executar_modo_webcam()
+    else:
+        executar_demonstracao_vigia()
