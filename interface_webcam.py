@@ -14,12 +14,25 @@ artesanal de PDI e dos indicadores de tomada de decisão (presença, lâmpada e 
 import os
 import sys
 import time
-import pygame
-import pygame.camera
+import warnings
+warnings.filterwarnings("ignore")
+
+# IMPORTANTE: Carrega os módulos de aprendizado profundo (TensorFlow/Keras) ANTES do Pygame
+# para evitar colisão de símbolos LLVM/Mesa no subsistema gráfico do Linux
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+try:
+    import tensorflow as tf
+    import keras
+except ImportError:
+    pass
+
 from PIL import Image
 
-# Importação dos módulos de PDI e Visão Computacional do VigIA
+# Importação e pré-carregamento do modelo antes da inicialização gráfica
 from prototipo_vigia import SistemaVigIA, ProcessadorImagem
+
+import pygame
+import pygame.camera
 
 
 def matriz_para_surface(matriz_pixels, largura_alvo=440, altura_alvo=330):
@@ -44,6 +57,10 @@ def executar_interface_webcam():
     Inicializa a janela interativa do VigIA com transmissão da câmera ao vivo,
     exibição da máscara de segmentação de PDI e métricas de eficiência energética.
     """
+    # 1. Pré-instancia o controlador VigIA e o modelo Keras ANTES do Pygame inicializar a janela
+    sistema = SistemaVigIA(potencia_iluminacao_watts=400, tarifa_kwh=0.85)
+
+    # 2. Inicialização do Pygame e subsistemas
     pygame.init()
     pygame.font.init()
     pygame.camera.init()
@@ -69,8 +86,6 @@ def executar_interface_webcam():
     cam = pygame.camera.Camera(dispositivo, (640, 480))
     cam.start()
 
-    # Instanciação do controlador central VigIA
-    sistema = SistemaVigIA(potencia_iluminacao_watts=400, tarifa_kwh=0.85)
     calibrado = False
     mensagem_alerta = "Posicione a câmera para a sala vazia e aperte [ESPAÇO] para Calibrar Fundo."
     cor_alerta = (234, 179, 8)  # Amarelo alerta
