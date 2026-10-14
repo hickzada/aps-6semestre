@@ -49,11 +49,26 @@ def preparar_dataset_local(diretorio_base="dataset", diretorio_reais="imagens_re
     img_vazio.resize((64, 64)).save(os.path.join(pasta_vazio, f"vazio_{idx:03d}.jpg"))
     idx += 1
     img_vazio.resize((64, 64)).transpose(Image.FLIP_LEFT_RIGHT).save(os.path.join(pasta_vazio, f"vazio_{idx:03d}.jpg"))
+    idx += 1
+
+    # Inclusão de amostras negativas de paredes e objetos inanimados (celulares, blocos, objetos escuros)
+    from PIL import ImageDraw
+    for tonalidade in [(215, 215, 220), (195, 200, 205), (175, 175, 180), (30, 35, 40), (15, 15, 20)]:
+        patch = Image.new("RGB", (64, 64), tonalidade)
+        patch.save(os.path.join(pasta_vazio, f"vazio_parede_{idx:03d}.jpg"))
+        idx += 1
+        # Objeto retangular escuro (simulação de celular/gadget em frente à parede)
+        obj_sim = Image.new("RGB", (64, 64), (210, 212, 218))
+        d = ImageDraw.Draw(obj_sim)
+        d.rectangle([(18, 10), (46, 54)], fill=(20, 25, 30))
+        d.ellipse([(22, 14), (30, 22)], fill=(45, 50, 55))
+        obj_sim.save(os.path.join(pasta_vazio, f"vazio_celular_{idx:03d}.jpg"))
+        idx += 1
 
     idx = 0
     for w in [180, 220, 260, 300]:
         for x in range(0, img_ocupado.width - w + 1, 50):
-            for y in range(0, img_ocupado.height - w + 1, 40):
+            for y in range(40, img_ocupado.height - w + 1, 40):
                 crop = img_ocupado.crop((x, y, x + w, y + w)).resize((64, 64))
                 crop.save(os.path.join(pasta_ocupado, f"ocupado_{idx:03d}.jpg"))
                 idx += 1

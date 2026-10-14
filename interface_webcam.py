@@ -153,6 +153,7 @@ def executar_interface_webcam():
         "calibrado": False,
         "alvo_tipo": "STANDBY",
         "bbox": None,
+        "pele_pct": 0.0,
         "msg_banner": "AFASTE-SE E PRESSIONE [ESPAÇO] PARA CALIBRAR FUNDO ZERO"
     }
 
@@ -251,15 +252,33 @@ def executar_interface_webcam():
                         crop_pil = img_pil.crop((c_x1, c_y1, c_x2, c_y2))
                         prob_crop = sistema.detector.classificar_neural(crop_pil)
 
-                # Maior evidência neural disponível
-                scores = [p for p in (prob_full, prob_crop) if p is not None]
-                prob_neural = max(scores) if scores else None
+                # A predição neural do alvo foca prioritariamente no recorte (ROI) do objeto ativo.
+                # Se houver recorte ativo, avalia diretamente o objeto em movimento; caso contrário, a cena global.
+                prob_neural = prob_crop if prob_crop is not None else prob_full
                 estado["cnn_prob"] = prob_neural
+
+                # Análise PDI de crominância biométrica (pele humana) no recorte do alvo
+                # Modelos clássicos de segmentação fotométrica (Kovac et al. / Peer et al.):
+                # R > 60, G > 30, B > 15, R - G > 10, R > B, max - min > 15
+                densidade_pele = 0.0
+                if crop_pil is not None:
+                    arr_crop = np.array(crop_pil.convert("RGB"), dtype=np.int16)
+                    r_c, g_c, b_c = arr_crop[:, :, 0], arr_crop[:, :, 1], arr_crop[:, :, 2]
+                    mascara_pele = (
+                        (r_c > 60) & (g_c > 30) & (b_c > 15) &
+                        ((r_c - g_c) > 10) & (r_c > b_c) &
+                        ((np.maximum(r_c, np.maximum(g_c, b_c)) - np.minimum(r_c, np.minimum(g_c, b_c))) > 15)
+                    )
+                    total_crop_px = arr_crop.shape[0] * arr_crop.shape[1]
+                    if total_crop_px > 0:
+                        densidade_pele = (np.count_nonzero(mascara_pele) / float(total_crop_px)) * 100.0
+                estado["pele_pct"] = densidade_pele
 
                 # Discriminação Estrita Humano vs. Objetos Inanimados:
                 # 1. Movimentação mínima relevante: pct_ocupado >= 0.8%
                 # 2. Antropometria: altura vertical >= 28 px (~23% da cena) e proporção ereta H/W >= 0.55
-                # 3. Validação convolucional: probabilidade da rede neural >= 0.50
+                # 3. Validação convolucional sobre o recorte: probabilidade da rede neural >= 0.50
+                # 4. Validação biométrica: presença de traços cromáticos humanos (pele/rosto >= 1.5%)
                 if pct_ocupado < 0.8 or bbox is None:
                     ocupado = False
                     alvo_tipo = "NENHUM"
@@ -267,13 +286,14 @@ def executar_interface_webcam():
                 else:
                     eh_antropometrico = (box_h >= 28 and razao_aspecto >= 0.55)
                     eh_humano_neural = (prob_neural is not None and prob_neural >= 0.50)
+                    tem_biometria = (densidade_pele >= 1.5 or (prob_neural is not None and prob_neural >= 0.85 and densidade_pele > 0.0))
 
-                    if eh_antropometrico and eh_humano_neural:
+                    if eh_antropometrico and eh_humano_neural and tem_biometria:
                         ocupado = True
                         alvo_tipo = "HUMANO"
                         confianca = max(80.0, min(99.9, prob_neural * 100.0))
                     else:
-                        # Objeto inanimado detectado na cena (copo, mochila, cadeira deslocada, celular)
+                        # Objeto inanimado detectado na cena (celular, copo, cadeira deslocada, mochila)
                         ocupado = False
                         alvo_tipo = "OBJETO_IGNORADO"
                         confianca = max(80.0, min(99.9, (1.0 - (prob_neural or 0.0)) * 100.0))
@@ -431,21 +451,22 @@ def executar_interface_webcam():
         alvo_str = "HUMANO" if estado["ocupado"] else ("OBJETO REJEITADO" if estado.get("alvo_tipo") == "OBJETO_IGNORADO" else "STANDBY")
         cor_alvo_lbl = COR_GREEN if estado["ocupado"] else ((245, 158, 11) if estado.get("alvo_tipo") == "OBJETO_IGNORADO" else COR_CYAN)
         lbl_m0 = fonte_mono.render(f"FILTRO ALVO    : {alvo_str}", True, cor_alvo_lbl)
-        tela.blit(lbl_m0, (c2_x + 16, deck_y + 38))
+        tela.blit(lbl_m0, (c2_x + 16, deck_y + 35))
 
         lbl_m1 = fonte_mono.render(f"MÁSCARA PDI    : {estado['area_pct']:.2f}%", True, COR_TXT)
-        tela.blit(lbl_m1, (c2_x + 16, deck_y + 60))
+        tela.blit(lbl_m1, (c2_x + 16, deck_y + 55))
 
         prob_val = estado["cnn_prob"]
         str_cnn = f"{prob_val * 100.0:.1f}%" if prob_val is not None else "STANDBY"
         lbl_m2 = fonte_mono.render(f"PREDIÇÃO CNN   : {str_cnn}", True, COR_TXT)
-        tela.blit(lbl_m2, (c2_x + 16, deck_y + 82))
+        tela.blit(lbl_m2, (c2_x + 16, deck_y + 75))
 
-        lbl_m3 = fonte_mono.render("SENTINELA PIR  : ARMADO", True, (161, 161, 170))
-        tela.blit(lbl_m3, (c2_x + 16, deck_y + 104))
+        pele_val = estado.get("pele_pct", 0.0)
+        lbl_m3 = fonte_mono.render(f"BIOMETRIA PELE : {pele_val:.1f}%", True, COR_CYAN if pele_val >= 1.5 else COR_MUTED)
+        tela.blit(lbl_m3, (c2_x + 16, deck_y + 95))
 
-        lbl_m4 = fonte_micro.render("LIMIAR: 28  KERNEL: 3x3  FILTRO: HUMANO", True, COR_MUTED)
-        tela.blit(lbl_m4, (c2_x + 16, deck_y + 130))
+        lbl_m4 = fonte_micro.render("REJEIÇÃO ATIVA : CELULAR/MÓVEIS/COPOS", True, COR_MUTED)
+        tela.blit(lbl_m4, (c2_x + 16, deck_y + 125))
 
         # Coluna 3: Sustentabilidade e Carbono
         c3_x = 640
