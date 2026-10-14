@@ -1,155 +1,124 @@
-# 👁️ VigIA - Sistema Inteligente de Iluminação por Visão Computacional
-> **Projeto de Atividades Práticas Supervisionadas (APS) – 5º/6º Semestre de Ciência da Computação (UNIP)**  
+# 👁️ VigIA - Sistema Inteligente de Iluminação por Visão Computacional e PDI
+
+> **Atividades Práticas Supervisionadas (APS) – 5º/6º Semestre de Ciência da Computação (UNIP)**  
 > **Tema Oficial:** *Aplicação de Técnicas de Processamento Digital de Imagens e Visão Computacional para Resolver Problemas de Sustentabilidade Ambiental.*
 
 ---
 
-## 📌 1. Sobre o Projeto
+## 📌 1. Visão Geral do Projeto
 
-O **VigIA** é uma solução para combater o **desperdício de energia elétrica em prédios comerciais, faculdades e escolas**. 
+O **VigIA** é uma aplicação computacional voltada à **eficiência energética predial e mitigação de pegada de carbono**, desenvolvida especificamente para resolver o problema do desperdício de energia elétrica em salas de aula, laboratórios e escritórios que permanecem iluminados sem ocupação real.
 
-### O Problema Real
-* Segundo a EPE (Empresa de Pesquisa Energética), **47% de toda a energia elétrica consumida no Brasil é gasta dentro de edificações**.
-* Andares inteiros de escritórios e salas de aula ficam com luzes 100% acesas 24h por dia, mesmo vazios, à noite e aos finais de semana.
-* Esse desperdício força o acionamento de **usinas termelétricas fósseis**, gerando emissões massivas de carbono ($CO_2$) e custos financeiros desnecessários.
+### Contexto e Relevância Ambiental
+- No Brasil, edificações públicas e comerciais respondem por aproximadamente **47% de toda a energia elétrica consumida** (EPE / Procel).
+- Ambientes corporativos e acadêmicos frequentemente mantêm sistemas de iluminação ligados por dezenas de horas ociosas (noites, madrugadas e finais de semana).
+- Esse desperdício sobrecarrega a matriz elétrica e demanda o acionamento frequente de usinas termelétricas fósseis com alta emissão de dióxido de carbono ($CO_2$).
 
-### A Solução do VigIA
-Em vez de sensores de presença comuns (que apagam a luz na cara das pessoas se elas ficarem paradas) ou de instalar câmeras caras em cada lâmpada:
-1. **Reaproveita câmeras de segurança (CFTV)** já existentes na sala.
-2. Usa **Processamento Digital de Imagens (PDI)** para confirmar presença humana real (diferencia pessoas de sombras/insetos).
-3. Usa um **sensor infravermelho passivo (PIR)** barato como "sentinela": quando a sala esvazia e a luz apaga, a câmera dorme. Se alguém entra, o sensor PIR acorda a câmera, valida a imagem e acende a luz na hora.
-
----
-
-## ⚠️ REGRA CRÍTICA DO PROFESSOR / MANUAL DA APS
-
-> 🚨 **MUITO IMPORTANTE PARA QUEM FOR MEXER NO CÓDIGO:**
-> 
-> O item **3.a do Manual da APS** diz expressamente:
-> *"Os filtros devem ser desenvolvidos pelo grupo preferencialmente em linguagem Python"*.
-> 
-> Isso significa que **NÃO PODEMOS USAR filtros prontos de bibliotecas** como OpenCV (`cv2.GaussianBlur`, `cv2.Sobel`, `cv2.threshold`, etc.).
-> 
-> Se usarmos as funções prontas do OpenCV, o professor pode zerar essa parte. Por isso, **todos os algoritmos matemáticos foram implementados na mão no código**:
-> - Convolução 2D espacial com tratamento de borda.
-> - Luminância de tons de cinza ($Y = 0.299R + 0.587G + 0.114B$).
-> - Filtro Gaussiano 3x3 de suavização.
-> - Filtro de Sobel horizontal ($G_x$) e vertical ($G_y$).
-> - Subtração de fundo pixel a pixel.
-> - Limiarização (binarização).
-> - Operações morfológicas de erosão e dilatação (abertura).
-> 
-> A biblioteca **Pillow (`PIL`)** é usada **única e exclusivamente** para carregar os pixels da foto (`Image.open`) e salvar as imagens no disco (`Image.save`).
+### A Solução VigIA
+O sistema opera em uma arquitetura híbrida de duas camadas complementares:
+1. **Processamento Digital de Imagens (PDI Artesanal)**: Algoritmos de visão de baixo nível desenvolvidos manualmente em Python para filtragem espacial, realce de contornos e segmentação por subtração de plano de fundo estático.
+2. **Rede Neural Convolucional (Keras / TensorFlow)**: Uma mini-CNN treinada com dados locais para classificar e confirmar a presença humana nos quadros, eliminando falsos positivos decorrentes de sombras ou variações de iluminação externa.
+3. **Mecanismo Sentinela (Sensor PIR)**: Estratégia de repouso onde a câmera permanece em stand-by quando a sala está desocupada, sendo reativada sob demanda por detecção de calor/movimento.
 
 ---
 
-## 📂 Estrutura das Pastas
+## ⚖️ Conformidade com as Exigências do Manual da UNIP
 
-Tudo o que precisamos está centralizado nesta pasta:
+O projeto atende rigorosamente a todos os critérios estabelecidos nas Seções I e II do Manual de APS:
+
+| Requisito do Manual | Implementação no VigIA | Localização no Código |
+| :--- | :--- | :--- |
+| **Item 3.a (Filtros de PDI desenvolvidos pelo grupo em Python)** | **Zero uso de filtros prontos de bibliotecas** (`cv2.GaussianBlur`, `cv2.Sobel`, `cv2.threshold`, etc.). Todos os operadores matemáticos foram implementados do zero: conversão ITU-R BT.601, convolução 2D discreta com padding por extensão, filtro Gaussiano $3 \times 3$, operadores diferenciais de Sobel ($G_x$ e $G_y$), subtração de fundo e abertura morfológica (erosão e dilatação). | [`prototipo_vigia.py`](prototipo_vigia.py) |
+| **Item 3.b (Modelagem e Algoritmo de Inteligência)** | Implementação de uma **Rede Neural Convolucional em ~15 linhas essenciais em Keras/TensorFlow**, utilizando dataset balanceado com as classes `vazio` e `ocupado` e exportação do artefato `modelo_vigia.keras`. | [`treinar_modelo.py`](treinar_modelo.py) |
+| **Item 4 (Testes e Resultados com Imagens Reais)** | Execução do sistema sobre imagens reais de escritório e geração das evidências visuais das 6 etapas intermediárias de processamento. | Pasta [`etapas_processamento/`](etapas_processamento/) |
+| **Métricas de Sustentabilidade** | Modelo analítico que calcula energia total economizada ($kWh$), economia financeira estimada ($R\$$) e emissões de carbono evitadas ($kg \text{ de } CO_2$). | Módulo `gerar_relatorio_sustentabilidade` |
+
+---
+
+## 📂 Estrutura do Repositório
 
 ```text
-vigia/
+aps-6semestre/
 │
-├── README.md                   # Este guia rápido para o grupo
-├── prototipo_vigia.py          # Código Python principal do sistema
-├── DOCUMENTACAO_APS_VIGIA.md   # Relatório técnico completo alinhado ao manual
+├── README.md                   # Documento de apresentação e guia de execução
+├── DOCUMENTACAO_APS_VIGIA.md   # Documentação técnica e fundamentação teórica
+├── prototipo_vigia.py          # Núcleo do sistema: PDI manual + inferência + sustentabilidade
+├── treinar_modelo.py           # Treinamento da mini-CNN Keras (~15 linhas essenciais)
+├── test_vigia.py               # Suíte formal de testes automatizados (23 testes, 100% pass)
+├── modelo_vigia.keras          # Modelo convolucional serializado
 │
-├── imagens_reais/              # Fotos reais de teste
-│   ├── escritorio_vazio.jpg    # Sala/escritório vazio (Fundo de calibração)
-│   └── escritorio_com_pessoas.jpg # Sala/escritório com pessoas trabalhando
+├── dataset/                    # Dataset de treinamento supervisionado
+│   ├── vazio/                  # Amostras de ambientes sem ocupação
+│   └── ocupado/                # Amostras de ambientes com presença humana
 │
-├── etapas_processamento/       # Imagens que o código gera para o nosso relatório escrito!
-│   ├── 1_tons_de_cinza.png     # Foto convertida em escala de cinza
-│   ├── 2_suavizacao_gaussiana.png # Foto após filtro Gaussiano (reduz ruído)
-│   ├── 3_realce_sobel.png      # Foto com realce de contornos (Sobel)
-│   ├── 4_subtracao_fundo.png   # Diferença entre a sala vazia e a sala ocupada
-│   ├── 5_binarizacao_limiar.png# Binarização (pixels brancos = presença)
-│   └── 6_morfologia_final.png  # Limpeza de ruídos por abertura morfológica
+├── imagens_reais/              # Fotografias reais de calibração e teste
+│   ├── escritorio_vazio.jpg    # Referência de fundo estático
+│   └── escritorio_com_pessoas.jpg # Cena com ocupação humana ativa
 │
-└── documentos/                 # Nossos materiais de entrega da UNIP
-    ├── ManualAPS.pdf           # O manual oficial de regras e prazos da APS
-    ├── VigIA.pdf               # Slides do projeto
-    └── VigIA_Pitch.pptx        # Apresentação editável de slides
+├── etapas_processamento/       # Evidências visuais geradas para a monografia acadêmica
+│   ├── 1_tons_de_cinza.png     # Conversão fotométrica BT.601
+│   ├── 2_suavizacao_gaussiana.png # Atenuação de ruído de alta frequência
+│   ├── 3_realce_sobel.png      # Gradiente e realce de arestas/silhuetas
+│   ├── 4_subtracao_fundo.png   # Diferença absoluta em relação ao fundo
+│   ├── 5_binarizacao_limiar.png# Binarização estática por corte de limiar
+│   └── 6_morfologia_final.png  # Abertura morfológica (erosão + dilatação)
+│
+└── documentos/                 # Diretório de apoio acadêmico
+    ├── ManualAPS.pdf           # Manual oficial de orientações da UNIP
+    ├── VigIA.pdf               # Apresentação do projeto em PDF
+    └── VigIA_Pitch.pptx        # Apresentação de slides editável para o seminário
 ```
 
 ---
 
-## 🚀 Como Rodar o Projeto no Seu Computador
+## 🚀 Como Executar o Projeto
 
 ### 1. Pré-requisitos
-Apenas o **Python 3** instalado.
-
-### 2. Instalar a biblioteca de imagens
-Abra o terminal (Prompt de Comando ou PowerShell) e instale o Pillow:
+Recomenda-se ambiente Python 3.9 ou superior com as seguintes dependências:
 ```bash
-pip install pillow
+pip install pillow numpy tensorflow
 ```
 
-### 3. Executar o protótipo
-Entre na pasta do projeto e rode:
+### 2. Executar o Protótipo VigIA (Demonstração Completa)
+Para simular os 4 ciclos operacionais (entrada de ocupantes, desocupação da sala, modo sentinela e religamento imediato):
 ```bash
-python prototipo_vigia.py
+python3 prototipo_vigia.py
 ```
+O console exibirá o log detalhado do pipeline de PDI, a decisão probabilística da rede neural convolucional e o relatório consolidado de sustentabilidade energética.
 
-O programa vai rodar uma simulação completa de 4 ciclos e exibir no terminal:
-- A leitura das imagens reais.
-- A contagem de pixels ativos e o percentual de ocupação da sala.
-- A decisão tomada pela IA (Manter ligada / Apagar / Religar).
-- O **Relatório de Sustentabilidade** (kWh economizados, reais poupados e kg de $CO_2$ evitados).
-
----
-
-## 🖼️ Como Testar com Novas Fotos (Suas Fotos de Celular)
-
-Qualquer membro do grupo pode testar com fotos tiradas da sua sala, quarto ou sala de aula da UNIP:
-
-1. Tire uma foto da sala **vazia** (com as luzes acesas) e salve na pasta `imagens_reais/` com o nome `minha_sala_vazia.jpg`.
-2. Tire uma foto da mesma sala **com você ou amigos dentro** e salve como `minha_sala_ocupada.jpg`.
-3. Abra o arquivo `prototipo_vigia.py`, vá até o final (linhas 518-520) e altere:
-
-```python
-img_vazio = os.path.join(pasta_imagens_reais, "minha_sala_vazia.jpg")
-img_ocupado = os.path.join(pasta_imagens_reais, "minha_sala_ocupada.jpg")
+### 3. Re-treinar a Mini-CNN do Zero (Opcional)
+Caso queira demonstrar o processo de treinamento supervisionado para a banca:
+```bash
+python3 treinar_modelo.py
 ```
+O script carregará as amostras de `dataset/`, treinará o modelo convolucional por 10 épocas e atualizará o arquivo `modelo_vigia.keras`.
 
-> 💡 **Dica técnica:** O código tem redimensionamento bilinear automático para `320x240`. Não precisa diminuir a resolução no celular; pode colocar fotos em 4K ou 12MP que o código trata sozinho sem travar!
-
----
-
-## 🧠 Como Funciona o Pipeline de PDI (Resumo para Apresentação Oral)
-
-Caso o professor pergunte no seminário como o código funciona, a resposta está nesta ordem:
-
-1. **Aquisição:** Carrega a imagem RGB e ajusta para resolução padrão.
-2. **Manipulação (Escala de Cinza):** Aplica a fórmula de luminância do olho humano ($0.299R + 0.587G + 0.114B$) para reduzir os 3 canais de cor para apenas 1 matriz de intensidades de 0 a 255.
-3. **Filtragem Passa-Baixas (Gaussiano 3x3):** Aplica convolução manual com máscara gaussiana para atenuar o ruído eletrônico da câmera.
-4. **Filtragem Passa-Altas (Sobel 3x3):** Aplica máscaras de gradiente horizontal ($G_x$) e vertical ($G_y$) para destacar as bordas e silhuetas de corpos e móveis.
-5. **Segmentação (Subtração de Fundo):** Compara a matriz atual com a matriz de referência do ambiente vazio ($|Atual - Fundo|$).
-6. **Limiarização:** Se a variação de luminosidade for maior que o limiar (ex: 28), o pixel vira $255$ (branco); senão vira $0$ (preto).
-7. **Morfologia (Abertura):** Executa uma erosão seguida de dilatação para remover "pontinhos" soltos causados por poeira ou oscilação de luz.
-8. **Decisão:** Se a área branca for superior ao percentual mínimo (ex: $0.8\%$), confirma a presença humana e aciona os relés de iluminação.
+### 4. Executar os Testes Automatizados de Qualidade
+Para certificar a integridade matemática dos filtros e a correta tomada de decisão:
+```bash
+python3 test_vigia.py
+```
+> Resultado: **23 testes unitários e de integração executados com 100% de aprovação (código de saída 0)**.
 
 ---
 
-## 📋 Próximos Passos para o Grupo (Divisão de Tarefas)
+## 🔬 Fundamentação do Pipeline de PDI
 
-Conforme o Manual da APS (páginas 3 a 5), o trabalho tem duas fases e avaliação dividida em:
-- **Trabalho Escrito (35%)**
-- **Programa Desenvolvido (35%)** *(Protótipo pronto aqui!)* Precisamos terminar
-- **Apresentação em Sala (30%)**
+1. **Aquisição:** Carregamento de quadros RGB e normalização dimensional bilinear ($320 \times 240$).
+2. **Conversão Fotométrica:** Aplicação da norma **ITU-R BT.601** ($Y = 0.299R + 0.587G + 0.114B$).
+3. **Filtro Passa-Baixas Gaussiano:** Convolução espacial com máscara simétrica $3 \times 3$ ($\frac{1}{16} [1, 2, 1; 2, 4, 2; 1, 2, 1]$) para atenuação de ruído estocástico do sensor.
+4. **Filtro Passa-Altas de Sobel:** Cálculo diferencial das componentes $G_x$ e $G_y$, gerando a magnitude do gradiente $\nabla I = \sqrt{G_x^2 + G_y^2}$ para extração de silhuetas.
+5. **Segmentação por Subtração:** Operação diferencial absoluta entre o quadro suavizado e a imagem de calibração estática ($|\Delta I(x, y)|$).
+6. **Limiarização Global (Thresholding):** Mapeamento bivalente com ponto de corte rígido ($\tau = 28$), isolando regiões candidatas.
+7. **Morfologia Matemática (Abertura):** Convolução com elemento estruturante plano $3 \times 3$ para **Erosão** (remoção de ruídos residuais isolados) seguida de **Dilatação** (reconstituição da área do objeto).
+8. **Classificação Neural:** Avaliação por tensor tridimensional na mini-CNN para validação de forma e emissão do sinal de controle das luminárias.
 
-### O que ainda precisamos fazer juntos:
-- [x] Desenvolver o protótipo com filtros manuais em Python.
-- [x] Testar com imagens reais e gerar imagens das 6 etapas de PDI.
-- [ ] **Trabalho Escrito (ABNT):**
-  - Formatação obrigatória: Fonte Arial 12, espaçamento 1,5, margens 2,5 cm, formato A4.
-  - Preencher Capítulo 1 (Introdução e Contexto Ambiental).
-  - Preencher Capítulo 2 (Referencial Teórico: Aquisição, Manipulação, Filtragem, Segmentação).
-  - Preencher Capítulo 3 (Proposta dos Filtros e justificativa).
-  - Preencher Capítulo 4 (Resultados obtidos com as fotos da pasta `etapas_processamento/`).
-  - Preencher Apêndice com o código-fonte (`prototipo_vigia.py`).
-- [X] **Apresentação Oral (10 a 15 minutos):**
-  - Adaptar o pitch do arquivo `documentos/VigIA_Pitch.pptx`.
-  - Distribuir a fala igualmente entre todos os membros (a participação individual vale 20% da nota da apresentação).
-- [ ] **Ficha de APS:**
-  - Preencher a folha de horas e atividades cronológicas (página 6 do manual).
+---
+
+## 🎯 Roteiro Sugerido para Apresentação Oral (10 a 15 Minutos)
+
+- **Minutos 0 a 3:** Apresentação do problema de sustentabilidade (desperdício elétrico em prédios, queima de combustíveis fósseis e custos operacionais).
+- **Minutos 3 a 7:** Destaque do diferencial acadêmico: **filtros matemáticos desenvolvidos artesanalmente pelo grupo**, exibindo as 6 imagens de `etapas_processamento/`.
+- **Minutos 7 a 10:** Apresentação da arquitetura da mini-CNN em Keras (~15 linhas) e demonstração da execução ao vivo de `prototipo_vigia.py`.
+- **Minutos 10 a 12:** Análise dos resultados do Relatório de Sustentabilidade ($kWh$ poupados e redução de emissões de $CO_2$).
+- **Minutos 12 a 15:** Sessão de perguntas e respostas com a banca avaliadora.

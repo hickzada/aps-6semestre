@@ -25,6 +25,7 @@ CONFORMIDADE COM O MANUAL DA APS:
 import math
 import os
 import sys
+import numpy as np
 from PIL import Image
 
 
@@ -284,6 +285,89 @@ class ProcessadorImagem:
 
         return matriz_dilatada
 
+    @classmethod
+    def processar_pipeline_completo(cls, caminho_imagem, diretorio_saida=None, caminho_fundo=None):
+        """
+        Executa as 6 etapas completas do pipeline de Processamento Digital de Imagens (PDI):
+        1. Conversão para tons de cinza (Norma ITU-R BT.601)
+        2. Suavização Gaussiana passa-baixas 3x3
+        3. Realce de bordas direcionais via Sobel (Gx e Gy)
+        4. Subtração de imagem de plano de fundo
+        5. Binarização rígida por limiar
+        6. Abertura morfológica (erosão 3x3 seguida de dilatação 3x3)
+
+        :param caminho_imagem: Caminho do arquivo da cena atual ou objeto PIL.Image.Image.
+        :param diretorio_saida: Diretório opcional para salvar as 6 evidências em formato PNG.
+        :param caminho_fundo: Caminho opcional do arquivo de calibração de fundo estático.
+        :return: Dicionário contendo as imagens/matrizes das 6 etapas.
+        """
+        if isinstance(caminho_imagem, str):
+            imagem_atual = cls.carregar_imagem(caminho_imagem)
+        else:
+            imagem_atual = caminho_imagem.convert("RGB")
+
+        if caminho_fundo is not None:
+            if isinstance(caminho_fundo, str):
+                imagem_fundo = cls.carregar_imagem(caminho_fundo)
+            else:
+                imagem_fundo = caminho_fundo.convert("RGB")
+        else:
+            padrao_fundo = os.path.join(os.path.dirname(os.path.abspath(__file__)), "imagens_reais", "escritorio_vazio.jpg")
+            if os.path.exists(padrao_fundo):
+                imagem_fundo = cls.carregar_imagem(padrao_fundo)
+            else:
+                imagem_fundo = imagem_atual
+
+        # 1. Tons de Cinza
+        matriz_cinza = cls.converter_para_tons_de_cinza(imagem_atual)
+        matriz_fundo_cinza = cls.converter_para_tons_de_cinza(imagem_fundo)
+
+        # 2. Suavização Gaussiana 3x3
+        matriz_gaussiano = cls.filtro_suavizacao_gaussiana_3x3(matriz_cinza)
+        matriz_fundo_gaussiano = cls.filtro_suavizacao_gaussiana_3x3(matriz_fundo_cinza)
+
+        # 3. Realce Sobel
+        matriz_sobel = cls.filtro_realce_bordas_sobel(matriz_cinza)
+
+        # 4. Subtração de Fundo
+        matriz_subtracao = cls.subtrair_imagens(matriz_gaussiano, matriz_fundo_gaussiano)
+
+        # 5. Binarização
+        matriz_binarizada = cls.aplicar_limiarizacao(matriz_subtracao, limiar=28)
+
+        # 6. Abertura Morfológica
+        matriz_morfologia = cls.filtro_morfologico_abertura(matriz_binarizada)
+
+        matrizes = {
+            "tons_de_cinza": matriz_cinza,
+            "gaussiano": matriz_gaussiano,
+            "sobel": matriz_sobel,
+            "subtracao_fundo": matriz_subtracao,
+            "binarizada": matriz_binarizada,
+            "morfologia_final": matriz_morfologia,
+        }
+
+        if diretorio_saida is not None:
+            os.makedirs(diretorio_saida, exist_ok=True)
+            cls.salvar_imagem(matriz_cinza, os.path.join(diretorio_saida, "1_tons_de_cinza.png"))
+            cls.salvar_imagem(matriz_gaussiano, os.path.join(diretorio_saida, "2_suavizacao_gaussiana.png"))
+            cls.salvar_imagem(matriz_sobel, os.path.join(diretorio_saida, "3_realce_sobel.png"))
+            cls.salvar_imagem(matriz_subtracao, os.path.join(diretorio_saida, "4_subtracao_fundo.png"))
+            cls.salvar_imagem(matriz_binarizada, os.path.join(diretorio_saida, "5_binarizacao_limiar.png"))
+            cls.salvar_imagem(matriz_morfologia, os.path.join(diretorio_saida, "6_morfologia_final.png"))
+
+        altura = len(matriz_cinza)
+        largura = len(matriz_cinza[0])
+        imagens = {}
+        for nome, m in matrizes.items():
+            img = Image.new("L", (largura, altura))
+            pixels = [int(max(0, min(255, round(m[y][x])))) for y in range(altura) for x in range(largura)]
+            img.putdata(pixels)
+            img.matriz = m
+            imagens[nome] = img
+
+        return imagens
+
 
 # ===================================================================================
 # 2. MÓDULO DE VISÃO COMPUTACIONAL (CLASSIFICADOR DE PRESENÇA)
@@ -291,21 +375,80 @@ class ProcessadorImagem:
 
 class DetectorPresencaVigIA:
     """
-    Modelo de Visão Computacional para detecção de ocupação e presença humana.
-    Analisa a densidade espacial, contagem de pixels ativos e geometria.
+    Classificador de visão computacional e inferência neural convolucional (CNN)
+    para detecção e confirmação de presença humana em ambientes prediais.
+    Combina processamento digital de imagens artesanal (segmentação morfológica e
+    densidade espacial de ocupação) com inferência neural profunda supervisionada
+    via rede convolucional Keras/TensorFlow.
     """
 
-    def __init__(self, limiar_sensibilidade=25, percentual_minimo_ocupacao=0.8):
+    def __init__(self, caminho_modelo="modelo_vigia.keras", limiar_sensibilidade=25, percentual_minimo_ocupacao=0.8):
         """
-        :param limiar_sensibilidade: Tolerância de luminosidade para subtrair fundo.
-        :param percentual_minimo_ocupacao: % mínimo da cena ocupado por corpo humano.
+        :param caminho_modelo: Caminho do arquivo do modelo serializado Keras (.keras).
+        :param limiar_sensibilidade: Tolerância fotométrica para subtração de plano de fundo.
+        :param percentual_minimo_ocupacao: Limiar percentual mínimo da área útil ocupada.
         """
+        self.caminho_modelo = caminho_modelo
         self.limiar_sensibilidade = limiar_sensibilidade
         self.percentual_minimo_ocupacao = percentual_minimo_ocupacao
+        self.modelo = None
+        self._carregar_modelo()
 
-    def analisar_quadro(self, matriz_atual_suave, matriz_fundo_suave):
+    def _carregar_modelo(self):
         """
-        Executa a segmentação e calcula os índices estatísticos de presença na imagem.
+        Carrega o modelo convolucional pré-treinado salvo em disco.
+        """
+        candidatos = [
+            self.caminho_modelo,
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), self.caminho_modelo) if self.caminho_modelo else None
+        ]
+        for c in candidatos:
+            if c and os.path.exists(c):
+                try:
+                    import keras
+                    self.modelo = keras.models.load_model(c)
+                    break
+                except Exception:
+                    pass
+
+    def classificar_neural(self, imagem_pil_ou_caminho):
+        """
+        Executa a inferência neural da mini-CNN Keras.
+        Retorna a probabilidade estimada de presença humana no intervalo [0.0, 1.0].
+        """
+        if self.modelo is None:
+            self._carregar_modelo()
+        if self.modelo is None:
+            return None
+
+        try:
+            if isinstance(imagem_pil_ou_caminho, str):
+                img = ProcessadorImagem.carregar_imagem(imagem_pil_ou_caminho, redimensionar=None)
+            elif isinstance(imagem_pil_ou_caminho, Image.Image):
+                img = imagem_pil_ou_caminho.convert("RGB")
+            elif hasattr(imagem_pil_ou_caminho, "shape"):
+                arr = imagem_pil_ou_caminho
+                if len(arr.shape) == 3:
+                    arr = np.expand_dims(arr, axis=0)
+                if arr.shape[1:3] != (64, 64):
+                    pil_tmp = Image.fromarray(arr[0].astype(np.uint8)).resize((64, 64))
+                    arr = np.expand_dims(np.array(pil_tmp, dtype=np.float32), axis=0)
+                prob = float(self.modelo(arr, training=False)[0][0])
+                return prob
+            else:
+                return None
+
+            img_redim = img.resize((64, 64), Image.Resampling.BILINEAR)
+            tensor = np.expand_dims(np.array(img_redim, dtype=np.float32), axis=0)
+            prob = float(self.modelo(tensor, training=False)[0][0])
+            return prob
+        except Exception:
+            return None
+
+    def analisar_quadro(self, matriz_atual_suave, matriz_fundo_suave, imagem_original=None):
+        """
+        Executa a segmentação e calcula os índices estatísticos de presença na imagem,
+        integrando a inferência neural da mini-CNN quando disponível.
         """
         altura = len(matriz_atual_suave)
         largura = len(matriz_atual_suave[0])
@@ -338,12 +481,26 @@ class DetectorPresencaVigIA:
         if pixels_ativos > 0:
             centroide = (int(soma_x / pixels_ativos), int(soma_y / pixels_ativos))
 
-        presenca_confirmada = percentual_ocupado >= self.percentual_minimo_ocupacao
+        presenca_pdi = percentual_ocupado >= self.percentual_minimo_ocupacao
 
-        if presenca_confirmada:
-            confianca = min(99.9, 65.0 + (percentual_ocupado * 8.0))
+        # 5. Inferência Neural supervisionada com mini-CNN Keras
+        prob_neural = None
+        if imagem_original is not None:
+            prob_neural = self.classificar_neural(imagem_original)
+
+        if prob_neural is not None:
+            presenca_neural = prob_neural >= 0.5
+            presenca_confirmada = presenca_neural
+            if presenca_confirmada:
+                confianca = max(70.0, prob_neural * 100.0)
+            else:
+                confianca = max(70.0, (1.0 - prob_neural) * 100.0)
         else:
-            confianca = max(10.0, 100.0 - (percentual_ocupado * 25.0))
+            presenca_confirmada = presenca_pdi
+            if presenca_confirmada:
+                confianca = min(99.9, 65.0 + (percentual_ocupado * 8.0))
+            else:
+                confianca = max(10.0, 100.0 - (percentual_ocupado * 25.0))
 
         relatorio = {
             "presenca_detectada": presenca_confirmada,
@@ -352,6 +509,7 @@ class DetectorPresencaVigIA:
             "total_pixels": total_pixels,
             "centroide": centroide,
             "confianca_percentual": round(confianca, 1),
+            "probabilidade_neural": round(prob_neural, 6) if prob_neural is not None else None,
             "matrizes_intermediarias": {
                 "diferenca": matriz_diferenca,
                 "binaria": matriz_binaria,
@@ -360,6 +518,37 @@ class DetectorPresencaVigIA:
         }
 
         return relatorio
+
+    def analisar_presenca(self, caminho_imagem, imagem_processada=None):
+        """
+        Interface formal do módulo de Visão Computacional conforme contrato de projeto:
+        Realiza a inferência combinada (PDI + mini-CNN).
+        Retorna (presenca_confirmada: bool, confianca: float, detalhes: dict).
+        Trata exceções graciosamente com retorno de presença falsa em caso de ausência de calibração ou erro de leitura.
+        """
+        try:
+            if isinstance(caminho_imagem, str) and not os.path.exists(caminho_imagem) and imagem_processada is None:
+                return False, 0.0, {"erro": "Arquivo de imagem não encontrado", "presenca_detectada": False}
+
+            img = imagem_processada
+            if img is None:
+                img = ProcessadorImagem.carregar_imagem(caminho_imagem)
+
+            prob_neural = self.classificar_neural(img)
+            if prob_neural is None:
+                return False, 0.0, {"erro": "Rede neural indisponível", "presenca_detectada": False}
+
+            presenca_confirmada = prob_neural >= 0.5
+            confianca = max(70.0, (prob_neural if presenca_confirmada else (1.0 - prob_neural)) * 100.0)
+            detalhes = {
+                "presenca_detectada": presenca_confirmada,
+                "probabilidade_neural": round(prob_neural, 6),
+                "confianca_percentual": round(confianca, 1),
+                "caminho_imagem": caminho_imagem if isinstance(caminho_imagem, str) else None
+            }
+            return presenca_confirmada, round(confianca, 1), detalhes
+        except Exception as e:
+            return False, 0.0, {"erro": str(e), "presenca_detectada": False}
 
 
 # ===================================================================================
@@ -421,7 +610,14 @@ class SistemaVigIA:
         if not deve_processar:
             print("[MODO SENTINELA] Ninguém no ambiente e sem calor/movimento PIR. Lâmpadas apagadas.")
             self.horas_luz_economizada += (duracao_minutos / 60.0)
-            return {"luz_ligada": False, "motivo": "Sentinela PIR em guarda"}
+            return {
+                "luz_ligada": False,
+                "presenca": False,
+                "motivo": "Sentinela PIR em guarda",
+                "ocupacao_percentual": 0.0,
+                "confianca": 100.0,
+                "probabilidade_neural": 0.0
+            }
 
         # 1. Aquisição da imagem real atual
         imagem_atual = self.processador.carregar_imagem(caminho_imagem_atual)
@@ -433,12 +629,15 @@ class SistemaVigIA:
         # 3. Realce de Bordas Sobel manual
         matriz_bordas_sobel = self.processador.filtro_realce_bordas_sobel(matriz_cinza)
 
-        # 4. Detecção por Visão Computacional
-        resultado = self.detector.analisar_quadro(matriz_suave, self.matriz_fundo_referencia)
+        # 4. Detecção por Visão Computacional e Inferência Neural
+        resultado = self.detector.analisar_quadro(
+            matriz_suave, self.matriz_fundo_referencia, imagem_original=imagem_atual
+        )
         presenca = resultado["presenca_detectada"]
 
         print(f"[PDI & VISÃO] Pixels ativos: {resultado['pixels_ativos']} ({resultado['percentual_ocupado']}%)")
-        print(f"[DECISÃO IA] Presença Humana: {'SIM' if presenca else 'NÃO'} | Confiança: {resultado['confianca_percentual']}%")
+        prob_str = f" | Probabilidade CNN: {resultado['probabilidade_neural']:.4f}" if resultado.get("probabilidade_neural") is not None else ""
+        print(f"[INFERÊNCIA NEURAL] Presença Humana: {'SIM' if presenca else 'NÃO'}{prob_str} | Confiança: {resultado['confianca_percentual']}%")
 
         # 5. Lógica de Iluminação Sustentável
         if presenca:
@@ -472,35 +671,58 @@ class SistemaVigIA:
             "luz_ligada": self.luz_acesa,
             "presenca": presenca,
             "ocupacao_percentual": resultado["percentual_ocupado"],
-            "confianca": resultado["confianca_percentual"]
+            "confianca": resultado["confianca_percentual"],
+            "probabilidade_neural": resultado.get("probabilidade_neural")
         }
 
-    def gerar_relatorio_sustentabilidade(self):
+    def obter_relatorio_sustentabilidade(self):
         """
-        Métricas ambientais e econômicas do VigIA.
+        Retorna as métricas de sustentabilidade e eficiência energética em formato numérico estruturado.
+
+        Fórmulas matemáticas:
+        - kwh_convencional = (potencia_watts * horas_totais) / 1000.0
+        - kwh_vigia = (potencia_watts * horas_luz_acesa) / 1000.0
+        - kwh_poupados = kwh_convencional - kwh_vigia
+        - percentual_economia = (kwh_poupados / kwh_convencional * 100.0) se kwh_convencional > 0 senão 0.0
+        - economia_reais = kwh_poupados * tarifa_kwh
+        - reducao_co2_kg = kwh_poupados * 0.084 (fator médio anual do SIN / MCTI)
         """
         kwh_convencional = (self.potencia_watts * self.horas_totais_monitoradas) / 1000.0
         horas_luz_ligada = max(0.0, self.horas_totais_monitoradas - self.horas_luz_economizada)
         kwh_vigia = (self.potencia_watts * horas_luz_ligada) / 1000.0
 
         kwh_poupados = kwh_convencional - kwh_vigia
-        porcentagem_economia = (kwh_poupados / kwh_convencional * 100.0) if kwh_convencional > 0 else 0.0
+        percentual_economia = (kwh_poupados / kwh_convencional * 100.0) if kwh_convencional > 0 else 0.0
         economia_reais = kwh_poupados * self.tarifa_kwh
-        co2_evitado_kg = kwh_poupados * 0.084
+        reducao_co2_kg = kwh_poupados * 0.084
 
+        return {
+            "kwh_convencional": round(float(kwh_convencional), 4),
+            "kwh_vigia": round(float(kwh_vigia), 4),
+            "kwh_poupados": round(float(kwh_poupados), 4),
+            "economia_reais": round(float(economia_reais), 4),
+            "reducao_co2_kg": round(float(reducao_co2_kg), 4),
+            "percentual_economia": round(float(percentual_economia), 4)
+        }
+
+    def gerar_relatorio_sustentabilidade(self):
+        """
+        Retorna a síntese textual formatada do balanço energético e ambiental do VigIA.
+        """
+        dados = self.obter_relatorio_sustentabilidade()
         relatorio = f"""
 ===================================================================================
            RELATÓRIO DE SUSTENTABILIDADE E EFICIÊNCIA ENERGÉTICA (VigIA)
 ===================================================================================
 Tempo Total Monitorado           : {self.horas_totais_monitoradas:.1f} horas
-Tempo de Luz Poupada (Apagada)   : {self.horas_luz_economizada:.1f} horas ({porcentagem_economia:.1f}% de tempo desligado)
+Tempo de Luz Poupada (Apagada)   : {self.horas_luz_economizada:.1f} horas ({dados['percentual_economia']:.1f}% de tempo desligado)
 Potência Instalada da Sala       : {self.potencia_watts} Watts
 -----------------------------------------------------------------------------------
-Consumo Sem Automação            : {kwh_convencional:.2f} kWh
-Consumo Inteligente VigIA        : {kwh_vigia:.2f} kWh
-ENERGIA TOTAL POUPADA            : {kwh_poupados:.2f} kWh ({porcentagem_economia:.1f}% de redução)
-ECONOMIA FINANCEIRA ESTIMADA     : R$ {economia_reais:.2f}
-REDUÇÃO DE PEGADA DE CARBONO     : {co2_evitado_kg:.3f} kg de CO2 evitados
+Consumo Sem Automação            : {dados['kwh_convencional']:.2f} kWh
+Consumo Inteligente VigIA        : {dados['kwh_vigia']:.2f} kWh
+ENERGIA TOTAL POUPADA            : {dados['kwh_poupados']:.2f} kWh ({dados['percentual_economia']:.1f}% de redução)
+ECONOMIA FINANCEIRA ESTIMADA     : R$ {dados['economia_reais']:.2f}
+REDUÇÃO DE PEGADA DE CARBONO     : {dados['reducao_co2_kg']:.3f} kg de CO2 evitados
 ===================================================================================
 """
         return relatorio
