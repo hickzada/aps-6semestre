@@ -227,6 +227,7 @@ def executar_interface_webcam():
                 prob_full = sistema.detector.classificar_neural(img_pil)
                 
                 # Inferência neural direcionada à Região de Interesse (ROI) do alvo
+                crop_pil = None
                 prob_crop = None
                 box_w = 0
                 box_h = 0
