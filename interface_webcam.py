@@ -64,7 +64,15 @@ def processar_pdi_vetorizado(arr_gray_atual, arr_gray_fundo, limiar=28):
     pixels_ativos = int(np.count_nonzero(abertura))
     percentual = (pixels_ativos / float(h * w)) * 100.0
 
-    return abertura, pixels_ativos, percentual
+    bbox = None
+    if pixels_ativos > 0:
+        ys, xs = np.nonzero(abertura)
+        if len(ys) > 0:
+            min_y, max_y = int(np.min(ys)), int(np.max(ys))
+            min_x, max_x = int(np.min(xs)), int(np.max(xs))
+            bbox = (min_x, min_y, max_x, max_y)
+
+    return abertura, pixels_ativos, percentual, bbox
 
 
 def executar_interface_webcam():
@@ -143,6 +151,8 @@ def executar_interface_webcam():
         "confianca": 100.0,
         "fps": 60,
         "calibrado": False,
+        "alvo_tipo": "STANDBY",
+        "bbox": None,
         "msg_banner": "AFASTE-SE E PRESSIONE [ESPAÇO] PARA CALIBRAR FUNDO ZERO"
     }
 
@@ -195,8 +205,9 @@ def executar_interface_webcam():
 
         # 3. Processamento de PDI (apenas se calibrado)
         if calibrado and fundo_gray is not None:
-            mask_2d, pixels_ativos, pct_ocupado = processar_pdi_vetorizado(atual_gray, fundo_gray, limiar=28)
+            mask_2d, pixels_ativos, pct_ocupado, bbox = processar_pdi_vetorizado(atual_gray, fundo_gray, limiar=28)
             estado["area_pct"] = pct_ocupado
+            estado["bbox"] = bbox
 
             # Atualiza superfície da máscara PDI via surfarray (ultrarrápido)
             surf_pdi_mini = pygame.surfarray.make_surface(np.stack([mask_2d.T]*3, axis=-1))
@@ -208,27 +219,67 @@ def executar_interface_webcam():
                 
                 # Prepara tensor para mini-CNN Keras
                 raw_full = pygame.image.tostring(surf_cam, "RGB")
-                img_pil = Image.frombytes("RGB", surf_cam.get_size(), raw_full)
+                cam_w, cam_h = surf_cam.get_size()
+                img_pil = Image.frombytes("RGB", (cam_w, cam_h), raw_full)
                 
-                prob_neural = sistema.detector.classificar_neural(img_pil)
+                # Inferência neural global (cena inteira)
+                prob_full = sistema.detector.classificar_neural(img_pil)
+                
+                # Inferência neural direcionada à Região de Interesse (ROI) do alvo
+                prob_crop = None
+                box_w = 0
+                box_h = 0
+                razao_aspecto = 0.0
+
+                if bbox is not None and pixels_ativos >= 40:
+                    min_x, min_y, max_x, max_y = bbox
+                    box_w = max_x - min_x + 1
+                    box_h = max_y - min_y + 1
+                    razao_aspecto = box_h / max(1, box_w)
+
+                    scale_x = cam_w / float(proc_w)
+                    scale_y = cam_h / float(proc_h)
+                    pad_x = int(box_w * 0.15 * scale_x)
+                    pad_y = int(box_h * 0.15 * scale_y)
+
+                    c_x1 = max(0, int(min_x * scale_x) - pad_x)
+                    c_y1 = max(0, int(min_y * scale_y) - pad_y)
+                    c_x2 = min(cam_w, int(max_x * scale_x) + pad_x)
+                    c_y2 = min(cam_h, int(max_y * scale_y) + pad_y)
+
+                    if c_x2 > c_x1 + 10 and c_y2 > c_y1 + 10:
+                        crop_pil = img_pil.crop((c_x1, c_y1, c_x2, c_y2))
+                        prob_crop = sistema.detector.classificar_neural(crop_pil)
+
+                # Maior evidência neural disponível
+                scores = [p for p in (prob_full, prob_crop) if p is not None]
+                prob_neural = max(scores) if scores else None
                 estado["cnn_prob"] = prob_neural
 
-                # Decisão de presença (fusão PDI + CNN)
-                if pct_ocupado >= 2.5:
-                    ocupado = True
-                    confianca = max(80.0, min(99.9, 70.0 + pct_ocupado * 2.0))
-                elif pct_ocupado >= 0.8:
-                    if prob_neural is not None and prob_neural >= 0.40:
-                        ocupado = True
-                        confianca = max(70.0, prob_neural * 100.0)
-                    else:
-                        ocupado = False
-                        confianca = 75.0
-                else:
+                # Discriminação Estrita Humano vs. Objetos Inanimados:
+                # 1. Movimentação mínima relevante: pct_ocupado >= 0.8%
+                # 2. Antropometria: altura vertical >= 28 px (~23% da cena) e proporção ereta H/W >= 0.55
+                # 3. Validação convolucional: probabilidade da rede neural >= 0.50
+                if pct_ocupado < 0.8 or bbox is None:
                     ocupado = False
-                    confianca = 98.0
+                    alvo_tipo = "NENHUM"
+                    confianca = 99.0
+                else:
+                    eh_antropometrico = (box_h >= 28 and razao_aspecto >= 0.55)
+                    eh_humano_neural = (prob_neural is not None and prob_neural >= 0.50)
+
+                    if eh_antropometrico and eh_humano_neural:
+                        ocupado = True
+                        alvo_tipo = "HUMANO"
+                        confianca = max(80.0, min(99.9, prob_neural * 100.0))
+                    else:
+                        # Objeto inanimado detectado na cena (copo, mochila, cadeira deslocada, celular)
+                        ocupado = False
+                        alvo_tipo = "OBJETO_IGNORADO"
+                        confianca = max(80.0, min(99.9, (1.0 - (prob_neural or 0.0)) * 100.0))
 
                 estado["ocupado"] = ocupado
+                estado["alvo_tipo"] = alvo_tipo
                 estado["confianca"] = confianca
 
                 # Atualiza controlador físico
@@ -259,13 +310,46 @@ def executar_interface_webcam():
         tela.blit(lbl_fps, (largura_w - 140, 15))
 
         # --- VIEWPORT 1: CÂMERA AO VIVO ---
-        borda_cor_cam = COR_GREEN if estado["ocupado"] else COR_BORDA
-        pygame.draw.rect(tela, COR_BORDA, (pos_cam[0]-1, pos_cam[1]-1, vw+2, vh+2), 1)
+        cor_borda_cam = COR_GREEN if estado["ocupado"] else ((245, 158, 11) if estado.get("alvo_tipo") == "OBJETO_IGNORADO" else COR_BORDA)
+        pygame.draw.rect(tela, cor_borda_cam, (pos_cam[0]-1, pos_cam[1]-1, vw+2, vh+2), 1)
         
         # Redimensionamento direto e blit
         surf_cam_scaled = pygame.transform.scale(surf_cam, (vw, vh))
         tela.blit(surf_cam_scaled, pos_cam)
         
+        # Bounding Box analítica com classificação visual de alvo
+        if estado.get("bbox") is not None and estado["area_pct"] >= 0.8:
+            min_x, min_y, max_x, max_y = estado["bbox"]
+            scale_vw = vw / float(proc_w)
+            scale_vh = vh / float(proc_h)
+            
+            bx = pos_cam[0] + int(min_x * scale_vw)
+            by = pos_cam[1] + int(min_y * scale_vh)
+            bw = int((max_x - min_x + 1) * scale_vw)
+            bh = int((max_y - min_y + 1) * scale_vh)
+            
+            # Limites do viewport
+            bx = max(pos_cam[0], min(bx, pos_cam[0] + vw - 10))
+            by = max(pos_cam[1], min(by, pos_cam[1] + vh - 10))
+            bw = max(10, min(bw, pos_cam[0] + vw - bx))
+            bh = max(10, min(bh, pos_cam[1] + vh - by))
+            
+            if estado["ocupado"]:
+                cor_box = COR_GREEN
+                rotulo_alvo = f"HUMANO CONFIRMADO [{estado['confianca']:.0f}%]"
+            else:
+                cor_box = (245, 158, 11)  # Âmbar (Objeto inanimado descartado)
+                rotulo_alvo = "OBJETO DETECTADO: IGNORADO"
+                
+            pygame.draw.rect(tela, cor_box, (bx, by, bw, bh), 2)
+            
+            tag_surf = fonte_micro.render(rotulo_alvo, True, (0, 0, 0))
+            tag_w = tag_surf.get_width() + 8
+            tag_h = 16
+            tag_y = max(pos_cam[1], by - tag_h)
+            pygame.draw.rect(tela, cor_box, (bx, tag_y, tag_w, tag_h))
+            tela.blit(tag_surf, (bx + 4, tag_y + 1))
+
         # Overlay telemétrico no vídeo
         pygame.draw.rect(tela, (0, 0, 0), (pos_cam[0], pos_cam[1], 160, 20))
         lbl_v1 = fonte_micro.render("FEED // OPTICAL STREAM", True, COR_TXT)
@@ -282,6 +366,13 @@ def executar_interface_webcam():
         # --- BANNER DE STATUS INTERNO ---
         cor_banner = (245, 158, 11) if not calibrado else (39, 39, 42)
         txt_banner = estado["msg_banner"]
+        if calibrado:
+            if estado["ocupado"]:
+                txt_banner = "PRESENÇA HUMANA CONFIRMADA // ILUMINAÇÃO ACIONADA (400W)"
+            elif estado.get("alvo_tipo") == "OBJETO_IGNORADO":
+                txt_banner = "OBJETO INANIMADO IDENTIFICADO // REJEITADO (STANDBY 0W)"
+            else:
+                txt_banner = "SALA DESOCUPADA // MODO SENTINELA ATIVO (STANDBY 0W)"
         lbl_banner = fonte_mono.render(f"STATUS >> {txt_banner}", True, (244, 244, 245) if calibrado else (254, 240, 138))
         tela.blit(lbl_banner, (25, 385))
 
@@ -292,25 +383,41 @@ def executar_interface_webcam():
 
         # Coluna 1: Estado Primário
         c1_x = 25
-        cor_badge = (6, 78, 59) if estado["ocupado"] else (24, 24, 27)
-        borda_badge = (16, 185, 129) if estado["ocupado"] else COR_BORDA
+        if estado["ocupado"]:
+            cor_badge = (6, 78, 59)
+            borda_badge = (16, 185, 129)
+            str_presenca = "● HUMANO DETECTADO"
+            cor_txt_p = COR_GREEN
+            str_rele = "CARGA: 400W [ACIONADA]"
+            cor_rele = COR_TXT
+        elif estado.get("alvo_tipo") == "OBJETO_IGNORADO":
+            cor_badge = (45, 26, 0)
+            borda_badge = (245, 158, 11)
+            str_presenca = "○ OBJETO (IGNORADO)"
+            cor_txt_p = (251, 191, 36)
+            str_rele = "CARGA: 0W [STANDBY]"
+            cor_rele = COR_MUTED
+        else:
+            cor_badge = (24, 24, 27)
+            borda_badge = COR_BORDA
+            str_presenca = "○ SALA VAZIA"
+            cor_txt_p = (161, 161, 170)
+            str_rele = "CARGA: 0W [STANDBY]"
+            cor_rele = COR_MUTED
+
         pygame.draw.rect(tela, cor_badge, (c1_x, deck_y, col_w, deck_h), border_radius=4)
         pygame.draw.rect(tela, borda_badge, (c1_x, deck_y, col_w, deck_h), 1, border_radius=4)
 
-        lbl_s_tit = fonte_micro.render("ROOM OCCUPANCY", True, COR_MUTED)
+        lbl_s_tit = fonte_micro.render("OCUPAÇÃO DO AMBIENTE", True, COR_MUTED)
         tela.blit(lbl_s_tit, (c1_x + 16, deck_y + 14))
 
-        str_presenca = "● OCCUPIED" if estado["ocupado"] else "○ VACANT"
-        cor_txt_p = COR_GREEN if estado["ocupado"] else (161, 161, 170)
         lbl_pres = fonte_status.render(str_presenca, True, cor_txt_p)
         tela.blit(lbl_pres, (c1_x + 16, deck_y + 36))
 
-        str_rele = "LOAD: 400W [ENGAGED]" if estado["ocupado"] else "LOAD: 0W [STANDBY]"
-        cor_rele = COR_TXT if estado["ocupado"] else COR_MUTED
         lbl_rele = fonte_mono.render(str_rele, True, cor_rele)
         tela.blit(lbl_rele, (c1_x + 16, deck_y + 75))
 
-        lbl_conf = fonte_mono.render(f"CONFIDENCE : {estado['confianca']:.1f}%", True, COR_MUTED)
+        lbl_conf = fonte_mono.render(f"CONFIANÇA : {estado['confianca']:.1f}%", True, COR_MUTED)
         tela.blit(lbl_conf, (c1_x + 16, deck_y + 100))
 
         # Coluna 2: Métricas de Visão e PDI
@@ -318,22 +425,27 @@ def executar_interface_webcam():
         pygame.draw.rect(tela, COR_PAINEL, (c2_x, deck_y, col_w, deck_h), border_radius=4)
         pygame.draw.rect(tela, COR_BORDA, (c2_x, deck_y, col_w, deck_h), 1, border_radius=4)
 
-        lbl_v_tit = fonte_micro.render("COMPUTER VISION TELEMETRY", True, COR_MUTED)
+        lbl_v_tit = fonte_micro.render("TELEMETRIA DE VISÃO COMPUTACIONAL", True, COR_MUTED)
         tela.blit(lbl_v_tit, (c2_x + 16, deck_y + 14))
 
-        lbl_m1 = fonte_mono.render(f"PDI FOREGROUND : {estado['area_pct']:.2f}%", True, COR_TXT)
-        tela.blit(lbl_m1, (c2_x + 16, deck_y + 40))
+        alvo_str = "HUMANO" if estado["ocupado"] else ("OBJETO REJEITADO" if estado.get("alvo_tipo") == "OBJETO_IGNORADO" else "STANDBY")
+        cor_alvo_lbl = COR_GREEN if estado["ocupado"] else ((245, 158, 11) if estado.get("alvo_tipo") == "OBJETO_IGNORADO" else COR_CYAN)
+        lbl_m0 = fonte_mono.render(f"FILTRO ALVO    : {alvo_str}", True, cor_alvo_lbl)
+        tela.blit(lbl_m0, (c2_x + 16, deck_y + 38))
+
+        lbl_m1 = fonte_mono.render(f"MÁSCARA PDI    : {estado['area_pct']:.2f}%", True, COR_TXT)
+        tela.blit(lbl_m1, (c2_x + 16, deck_y + 60))
 
         prob_val = estado["cnn_prob"]
         str_cnn = f"{prob_val * 100.0:.1f}%" if prob_val is not None else "STANDBY"
-        lbl_m2 = fonte_mono.render(f"CNN INFERENCE  : {str_cnn}", True, COR_TXT)
-        tela.blit(lbl_m2, (c2_x + 16, deck_y + 65))
+        lbl_m2 = fonte_mono.render(f"PREDIÇÃO CNN   : {str_cnn}", True, COR_TXT)
+        tela.blit(lbl_m2, (c2_x + 16, deck_y + 82))
 
-        lbl_m3 = fonte_mono.render("SENTINEL PIR   : ARMED", True, COR_CYAN)
-        tela.blit(lbl_m3, (c2_x + 16, deck_y + 90))
+        lbl_m3 = fonte_mono.render("SENTINELA PIR  : ARMADO", True, (161, 161, 170))
+        tela.blit(lbl_m3, (c2_x + 16, deck_y + 104))
 
-        lbl_m4 = fonte_micro.render("THRESHOLD: 28  KERNEL: 3x3", True, COR_MUTED)
-        tela.blit(lbl_m4, (c2_x + 16, deck_y + 120))
+        lbl_m4 = fonte_micro.render("LIMIAR: 28  KERNEL: 3x3  FILTRO: HUMANO", True, COR_MUTED)
+        tela.blit(lbl_m4, (c2_x + 16, deck_y + 130))
 
         # Coluna 3: Sustentabilidade e Carbono
         c3_x = 640
@@ -341,25 +453,25 @@ def executar_interface_webcam():
         pygame.draw.rect(tela, COR_BORDA, (c3_x, deck_y, col_w, deck_h), 1, border_radius=4)
 
         dados_s = sistema.obter_relatorio_sustentabilidade()
-        lbl_e_tit = fonte_micro.render("RESOURCE EFFICIENCY", True, COR_MUTED)
+        lbl_e_tit = fonte_micro.render("EFICIÊNCIA ENERGÉTICA E CARBONO", True, COR_MUTED)
         tela.blit(lbl_e_tit, (c3_x + 16, deck_y + 14))
 
-        lbl_e1 = fonte_mono.render(f"SAVED ENERGY : {dados_s['kwh_poupados']:.4f} kWh", True, COR_GREEN)
+        lbl_e1 = fonte_mono.render(f"ENERGIA POUPADA: {dados_s['kwh_poupados']:.4f} kWh", True, COR_GREEN)
         tela.blit(lbl_e1, (c3_x + 16, deck_y + 40))
 
-        lbl_e2 = fonte_mono.render(f"COST AVOIDED : R$ {dados_s['economia_reais']:.2f}", True, COR_TXT)
+        lbl_e2 = fonte_mono.render(f"CUSTO EVITADO  : R$ {dados_s['economia_reais']:.2f}", True, COR_TXT)
         tela.blit(lbl_e2, (c3_x + 16, deck_y + 65))
 
         co2_g = dados_s["reducao_co2_kg"] * 1000.0
-        lbl_e3 = fonte_mono.render(f"CO2 REDUCTION: {co2_g:.2f} g", True, COR_CYAN)
+        lbl_e3 = fonte_mono.render(f"REDUÇÃO DE CO2 : {co2_g:.2f} g", True, COR_CYAN)
         tela.blit(lbl_e3, (c3_x + 16, deck_y + 90))
 
-        lbl_e4 = fonte_micro.render(f"DUTY CYCLE: {dados_s['percentual_economia']:.1f}% OFF", True, COR_MUTED)
+        lbl_e4 = fonte_micro.render(f"CICLO SUSTENTÁVEL: {dados_s['percentual_economia']:.1f}% OFF", True, COR_MUTED)
         tela.blit(lbl_e4, (c3_x + 16, deck_y + 120))
 
         # --- RODAPÉ DE COMANDOS ---
         pygame.draw.line(tela, COR_BORDA, (0, 600), (largura_w, 600), 1)
-        lbl_cmd = fonte_mono.render("[SPACE] CALIBRATE ZERO-POINT   |   [Q / ESC] EXIT SESSION", True, COR_MUTED)
+        lbl_cmd = fonte_mono.render("[ESPAÇO] CALIBRAR FUNDO ZERO   |   [Q / ESC] ENCERRAR SESSÃO", True, COR_MUTED)
         tela.blit(lbl_cmd, (25, 614))
 
         pygame.display.flip()

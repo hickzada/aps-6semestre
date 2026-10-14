@@ -565,23 +565,21 @@ class DetectorPresencaVigIA:
             prob_neural = self.classificar_neural(imagem_original)
 
         if prob_neural is not None:
-            # Fusão ponderada de decisão PDI e Rede Convolucional Keras:
-            # 1. Área segmentada nítida pelo PDI (>= 2.5%): confirma ocupação humana imediata
-            # 2. Área no limiar (0.8% a 2.5%): validação cruzada exigindo predição da CNN (>= 0.40)
-            # 3. Área insignificante (< 0.8%): sala desocupada (ruídos ópticos/eletrônicos eliminados)
-            if percentual_ocupado >= 2.5:
-                presenca_confirmada = True
-                confianca = max(80.0, min(99.9, 70.0 + percentual_ocupado * 2.0))
-            elif percentual_ocupado >= self.percentual_minimo_ocupacao:
-                if prob_neural >= 0.40:
+            # Fusão analítica PDI + Rede Convolucional Keras (Discriminação Humano vs. Objetos):
+            # Objetos inanimados (copos, cadeiras deslocadas, mochilas, celulares) acionam pixels no PDI,
+            # porém a mini-CNN supervisionada infere probabilidade reduzida (< 0.50).
+            # Para confirmação de presença humana, exige-se área ativa mínima e predição neural positiva.
+            if percentual_ocupado >= self.percentual_minimo_ocupacao:
+                if prob_neural >= 0.50:
                     presenca_confirmada = True
-                    confianca = max(70.0, prob_neural * 100.0)
+                    confianca = max(80.0, min(99.9, prob_neural * 100.0))
                 else:
+                    # Objeto inanimado detectado na cena mas classificado como não-humano
                     presenca_confirmada = False
-                    confianca = max(70.0, (1.0 - prob_neural) * 100.0)
+                    confianca = max(75.0, (1.0 - prob_neural) * 100.0)
             else:
                 presenca_confirmada = False
-                confianca = max(75.0, (1.0 - prob_neural) * 100.0)
+                confianca = max(80.0, (1.0 - prob_neural) * 100.0)
         else:
             presenca_confirmada = presenca_pdi
             if presenca_confirmada:
