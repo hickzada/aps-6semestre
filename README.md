@@ -7,11 +7,11 @@ Tema: Aplicação de Técnicas de Processamento Digital de Imagens e Visão Comp
 
 ## Integrantes do Grupo
 
-- Adrian
-- Gabriel
-- Henrique
-- Isa
-- Sarah
+- Membro 1
+- Membro 2
+- Membro 3
+- Membro 4
+- Membro 5
 
 ---
 
@@ -77,22 +77,22 @@ O script lê as amostras de `dataset/`, executa o treinamento supervisionado e s
 
 Com o código e os testes finalizados, restam as seguintes etapas de conferência e entrega:
 
-1. **Gabriel:**
-   - Clonar o repositório em uma máquina limpa e rodar `pip install -r` (ou os comandos acima) para certificar que roda de primeira sem conflitos de biblioteca.
+1. **Membro 1:**
+   - Clonar o repositório em uma máquina limpa e rodar os comandos de instalação para certificar que roda de primeira sem conflitos.
    - Executar `python3 test_vigia.py` e confirmar que os 23 testes passam.
 
-2. **Isa:**
+2. **Membro 2:**
    - Fazer a revisão final do relatório escrito em PDF, verificando as normas ABNT exigidas pelo manual da UNIP: fonte Arial 12, espaçamento 1.5, margens 2,5 cm e numeração de páginas.
-   - Conferir se os nomes e RAs de todos os cinco integrantes estão corretos na capa e folha de rosto.
+   - Conferir se os nomes e RAs de todos os integrantes estão corretos na capa e folha de rosto.
 
-3. **Adrian:**
+3. **Membro 3:**
    - Conferir se as imagens salvas na pasta `etapas_processamento/` (tons de cinza, Gaussiano, Sobel, subtração, limiar, morfologia e o `painel_comparativo_pdi.png`) estão inseridas no capítulo de Desenvolvimento do relatório como figuras numeradas.
 
-4. **Sarah:**
+4. **Membro 4:**
    - Imprimir e preencher a Ficha de Atividades Práticas Supervisionadas padrão da UNIP (anexa no final do manual da APS).
    - Coletar as assinaturas dos integrantes para anexar junto ao trabalho.
 
-5. **Henrique / Grupo:**
+5. **Membro 5 / Grupo:**
    - Realizar o upload da versão final do relatório em PDF no portal de entrega da UNIP ([http://trabalhosacademicos.unip.br/entrega/](http://trabalhosacademicos.unip.br/entrega/)) antes do encerramento do prazo.
 
 ---
